@@ -1,82 +1,58 @@
-apiVersion: tekton.dev/v1
+apiVersion: tekton.dev/v1beta1
 kind: Pipeline
 metadata:
-  name: tax-calculator
+  name: cd-pipeline
 spec:
+  workspaces:
+    - name: pipeline-workspace
   params:
-    - name: git-url
+    - name: repo-url
       type: string
-    - name: git-revision
+    - name: branch
       type: string
       default: main
-    - name: image
+    - name: build-image
       type: string
-    - name: ibm-region
-      type: string
-    - name: ibm-resource-group
-      type: string
-    - name: code-engine-project
-      type: string
-    - name: application
-      type: string
-      default: tax-calculator
-  workspaces:
-    - name: shared-data
-    - name: registry-auth
-    - name: ibm-credentials
   tasks:
     - name: clone
       taskRef:
-        name: clone-source
+        name: git-clone
+      workspaces:
+        - name: output
+          workspace: pipeline-workspace
       params:
         - name: url
-          value: $(params.git-url)
+          value: $(params.repo-url)
         - name: revision
-          value: $(params.git-revision)
-      workspaces:
-        - name: source
-          workspace: shared-data
-    - name: lint
-      runAfter: [clone]
+          value: $(params.branch)
+    - name: npminstall
       taskRef:
-        name: flake8
+        name: npm
+      runAfter:
+        - clone
       workspaces:
         - name: source
-          workspace: shared-data
-    - name: test
-      runAfter: [lint]
+          workspace: pipeline-workspace
+      params:
+        - name: ARGS
+          value:
+            - install
+    - name: tests
       taskRef:
-        name: pytest
+        name: jasmine
+      runAfter:
+        - npminstall
       workspaces:
         - name: source
-          workspace: shared-data
+          workspace: pipeline-workspace
     - name: build
-      runAfter: [test]
       taskRef:
-        name: build-image
-      params:
-        - name: image
-          value: $(params.image)
+        name: buildah
+      runAfter:
+        - tests
       workspaces:
         - name: source
-          workspace: shared-data
-        - name: registry-auth
-          workspace: registry-auth
-    - name: deploy
-      runAfter: [build]
-      taskRef:
-        name: deploy-code-engine
+          workspace: pipeline-workspace
       params:
-        - name: image
-          value: $(params.image)
-        - name: region
-          value: $(params.ibm-region)
-        - name: resource-group
-          value: $(params.ibm-resource-group)
-        - name: project
-          value: $(params.code-engine-project)
-        - name: application
-          value: $(params.application)
-      workspaces:
-        - name: ibm-credentials
-          workspace: ibm-credentials
+        - name: IMAGE
+          value: $(params.build-image)
