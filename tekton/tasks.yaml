@@ -1,0 +1,127 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: clone-source
+spec:
+  params:
+    - name: url
+      type: string
+    - name: revision
+      type: string
+      default: main
+  workspaces:
+    - name: source
+  steps:
+    - name: clone
+      image: alpine/git:2.45.2
+      script: |
+        set -eu
+        git clone --depth 1 --branch "$(params.revision)" \
+          "$(params.url)" "$(workspaces.source.path)"
+---
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: flake8
+spec:
+  workspaces:
+    - name: source
+  steps:
+    - name: lint
+      image: python:3.11-slim
+      workingDir: $(workspaces.source.path)
+      script: |
+        set -eu
+        python -m pip install --no-cache-dir -r requirements.txt
+        flake8 app.py tax.py tests
+---
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: pytest
+spec:
+  workspaces:
+    - name: source
+  steps:
+    - name: test
+      image: python:3.11-slim
+      workingDir: $(workspaces.source.path)
+      script: |
+        set -eu
+        python -m pip install --no-cache-dir -r requirements.txt
+        pytest --cov=app --cov=tax --cov-report=term-missing
+---
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: build-image
+spec:
+  params:
+    - name: image
+      type: string
+  workspaces:
+    - name: source
+    - name: registry-auth
+  steps:
+    - name: build-and-push
+      image: quay.io/buildah/stable:v1.38
+      workingDir: $(workspaces.source.path)
+      securityContext:
+        privileged: true
+      script: |
+        set -eu
+        buildah --storage-driver=vfs bud \
+          --format docker --tag "$(params.image)" .
+        buildah --storage-driver=vfs push \
+          --authfile "$(workspaces.registry-auth.path)/.dockerconfigjson" \
+          "$(params.image)" "docker://$(params.image)"
+---
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: deploy-code-engine
+spec:
+  params:
+    - name: image
+      type: string
+    - name: region
+      type: string
+    - name: resource-group
+      type: string
+    - name: project
+      type: string
+    - name: application
+      type: string
+  workspaces:
+    - name: ibm-credentials
+  steps:
+    - name: deploy
+      image: python:3.11-slim
+      env:
+        - name: IBM_CLOUD_REGION
+          value: $(params.region)
+        - name: IBM_CLOUD_RESOURCE_GROUP
+          value: $(params.resource-group)
+        - name: CE_PROJECT
+          value: $(params.project)
+        - name: APP_NAME
+          value: $(params.application)
+        - name: IBM_API_KEY_FILE
+          value: $(workspaces.ibm-credentials.path)/apikey
+      script: |
+        set -eu
+        apt-get update
+        apt-get install -y --no-install-recommends curl ca-certificates
+        rm -rf /var/lib/apt/lists/*
+        curl -fsSL https://clis.cloud.ibm.com/install/linux | sh
+        ibmcloud plugin install code-engine -f
+        ibmcloud login --apikey "$(cat "$IBM_API_KEY_FILE")" \
+          -r "$IBM_CLOUD_REGION" -g "$IBM_CLOUD_RESOURCE_GROUP"
+        ibmcloud ce project select --name "$CE_PROJECT"
+        if ibmcloud ce application get --name "$APP_NAME" >/dev/null 2>&1; then
+          ibmcloud ce application update --name "$APP_NAME" \
+            --image "$(params.image)"
+        else
+          ibmcloud ce application create --name "$APP_NAME" \
+            --image "$(params.image)" --port 8080 --min-scale 1 --max-scale 2
+        fi

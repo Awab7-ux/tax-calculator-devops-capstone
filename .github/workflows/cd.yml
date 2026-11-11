@@ -1,0 +1,72 @@
+name: CD
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the tested commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Install IBM Cloud CLI and plugins
+        run: |
+          curl -fsSL https://clis.cloud.ibm.com/install/linux | sh
+          ibmcloud plugin install container-registry -f
+          ibmcloud plugin install code-engine -f
+
+      - name: Log in and select IBM Cloud resources
+        env:
+          IBM_CLOUD_API_KEY: ${{ secrets.IBM_CLOUD_API_KEY }}
+          IBM_CLOUD_REGION: ${{ secrets.IBM_CLOUD_REGION }}
+          IBM_CLOUD_RESOURCE_GROUP: ${{ secrets.IBM_CLOUD_RESOURCE_GROUP }}
+          REGISTRY_NAMESPACE: ${{ vars.IBM_CLOUD_CONTAINER_REGISTRY_NAMESPACE }}
+          REGISTRY_HOST: ${{ vars.IBM_CLOUD_REGISTRY_HOST }}
+          CE_PROJECT: ${{ vars.IBM_CLOUD_CODE_ENGINE_PROJECT }}
+        run: |
+          set -euo pipefail
+          : "${IBM_CLOUD_API_KEY:?Set the IBM_CLOUD_API_KEY secret}"
+          : "${IBM_CLOUD_REGION:?Set the IBM_CLOUD_REGION secret}"
+          : "${IBM_CLOUD_RESOURCE_GROUP:?Set the IBM_CLOUD_RESOURCE_GROUP secret}"
+          : "${REGISTRY_NAMESPACE:?Set the IBM_CLOUD_CONTAINER_REGISTRY_NAMESPACE variable}"
+          : "${REGISTRY_HOST:?Set the IBM_CLOUD_REGISTRY_HOST variable}"
+          : "${CE_PROJECT:?Set the IBM_CLOUD_CODE_ENGINE_PROJECT variable}"
+          ibmcloud login --apikey "$IBM_CLOUD_API_KEY" \
+            -r "$IBM_CLOUD_REGION" -g "$IBM_CLOUD_RESOURCE_GROUP"
+          ibmcloud cr region-set "$IBM_CLOUD_REGION"
+          ibmcloud cr login
+          ibmcloud ce project select --name "$CE_PROJECT"
+
+      - name: Build and push image
+        env:
+          REGISTRY_NAMESPACE: ${{ vars.IBM_CLOUD_CONTAINER_REGISTRY_NAMESPACE }}
+          REGISTRY_HOST: ${{ vars.IBM_CLOUD_REGISTRY_HOST }}
+          IMAGE_TAG: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          IMAGE="${REGISTRY_HOST}/${REGISTRY_NAMESPACE}/tax-calculator:${IMAGE_TAG}"
+          docker build -t "$IMAGE" .
+          docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+
+      - name: Deploy to Code Engine
+        env:
+          APP_NAME: tax-calculator
+        run: |
+          set -euo pipefail
+          if ibmcloud ce application get --name "$APP_NAME" >/dev/null 2>&1; then
+            ibmcloud ce application update --name "$APP_NAME" --image "$IMAGE"
+          else
+            ibmcloud ce application create --name "$APP_NAME" \
+              --image "$IMAGE" --port 8080 --min-scale 1 --max-scale 2
+          fi

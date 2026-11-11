@@ -1,0 +1,12 @@
+.git
+.github
+.pytest_cache
+.venv
+__pycache__
+*.py[cod]
+.coverage
+htmlcov
+tests
+docs
+tekton
+k8s

@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Your Tax Estimate</title>
+  </head>
+  <body>
+    <main>
+      <h1>Your Tax Estimate</h1>
+      <p>Annual income: ${{ "{:,.2f}".format(income) }}</p>
+      <p>Filing status: {{ status }}</p>
+      <p>Estimated tax: ${{ "{:,.2f}".format(tax) }}</p>
+      <p>Effective tax rate: {{ "{:.2%}".format(effective_rate) }}</p>
+      <a href="/">Calculate another estimate</a>
+    </main>
+  </body>
+</html>

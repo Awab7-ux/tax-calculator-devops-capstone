@@ -1,0 +1,32 @@
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  generateName: tax-calculator-run-
+spec:
+  pipelineRef:
+    name: tax-calculator
+  params:
+    - name: git-url
+      value: https://github.com/<YOUR-USER>/tax-calculator-devops-capstone.git
+    - name: git-revision
+      value: main
+    - name: image
+      value: us.icr.io/<registry-namespace>/tax-calculator:latest
+    - name: ibm-region
+      value: us-south
+    - name: ibm-resource-group
+      value: Default
+    - name: code-engine-project
+      value: tax-calculator-project
+    - name: application
+      value: tax-calculator
+  workspaces:
+    - name: shared-data
+      persistentVolumeClaim:
+        claimName: tax-calculator-workspace
+    - name: registry-auth
+      secret:
+        secretName: docker-registry-auth
+    - name: ibm-credentials
+      secret:
+        secretName: ibm-cloud-credentials
