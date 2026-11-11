@@ -1,0 +1,18 @@
+apiVersion: tekton.dev/v1beta1
+kind: PipelineRun
+metadata:
+  generateName: cd-pipeline-run-
+spec:
+  pipelineRef:
+    name: cd-pipeline
+  params:
+    - name: repo-url
+      value: https://github.com/Awab7-ux/tax-calculator-devops-capstone.git
+    - name: branch
+      value: main
+    - name: build-image
+      value: us.icr.io/<namespace>/tax-calculator:latest
+  workspaces:
+    - name: pipeline-workspace
+      persistentVolumeClaim:
+        claimName: pipelinerun-pvc
